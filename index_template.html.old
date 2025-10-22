@@ -9,17 +9,17 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1 data-cy="website-title">{{ WEBSITE_TITLE }}</h1>
-  <h3 class="subtitle" data-cy="website-subtitle">{{ WEBSITE_SUBTITLE }}</h3>
+  <h1>{{ WEBSITE_TITLE }}</h1>
+  <h3 class="subtitle">{{ WEBSITE_SUBTITLE }}</h3>
   <hr class="modern-hr">
 
-  <div id="lightgallery" class="grid" data-cy="gallery-grid"></div>
+  <div id="lightgallery" class="grid"></div>
 
-<div class="pagination">
-  <button id="prev-btn" data-cy="prev-button">Previous</button>
-  <select id="page-select" aria-label="Jump to page" data-cy="page-select"></select>
-  <button id="next-btn" data-cy="next-button">Next</button>
-</div>
+  <div class="pagination">
+    <button id="prev-btn">Previous</button>
+    <span id="page-indicator"></span>
+    <button id="next-btn">Next</button>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/lightgallery.min.js"></script>
   <script>
@@ -27,7 +27,7 @@
     const gallery = document.getElementById('lightgallery');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
-    const pageSelect = document.getElementById('page-select');
+    const pageIndicator = document.getElementById('page-indicator');
 
     let lg = null;
     let images = [];
@@ -46,19 +46,6 @@
       params.set('page', page);
       const newUrl = location.pathname + '?' + params.toString() + location.hash;
       window.history.pushState({page}, '', newUrl);
-    }
-
-    function populatePageSelect(totalPages, currentPage) {
-      pageSelect.innerHTML = '';
-      for (let i = 1; i <= totalPages; i++) {
-        const option = document.createElement('option');
-        option.value = i;
-        option.textContent = `Page ${i} of ${totalPages}`;
-        if (i === currentPage) {
-          option.selected = true;
-        }
-        pageSelect.appendChild(option);
-      }
     }
 
     async function loadImages() {
@@ -85,7 +72,6 @@
         const anchor = document.createElement('a');
         anchor.href = img.src;
         anchor.dataset.index = idx;
-        anchor.dataset.cy = idx === 0 ? 'first-grid-item' : `grid-item-${idx}`;
         anchor.dataset.subHtml = `
           <div class='lg-sub-html'>
             <span class='description'>${img.description}</span><br>
@@ -94,7 +80,7 @@
           </div>`;
         anchor.innerHTML = `<img src="${useHighResTile ? img.src : img.thumb}" loading="lazy">`;
         gallery.appendChild(anchor);
-});
+      });
 
       if (lg) lg.destroy();
       lg = lightGallery(gallery, { selector: 'a', download: false, counter: false });
@@ -152,14 +138,13 @@
 
     function updatePagination(currentPage) {
       const totalPages = Math.ceil(images.length / pageSize);
-      populatePageSelect(totalPages, currentPage);
+      pageIndicator.textContent = `Page ${currentPage} of ${totalPages}`;
       prevBtn.disabled = currentPage === 1;
       nextBtn.disabled = currentPage === totalPages;
     }
 
     prevBtn.onclick = () => renderPage(getPageFromURL() - 1);
     nextBtn.onclick = () => renderPage(getPageFromURL() + 1);
-    pageSelect.onchange = () => renderPage(parseInt(pageSelect.value));
 
     window.onpopstate = () => renderPage(getPageFromURL(), false);
 
@@ -179,3 +164,4 @@
   </h3>
 </body>
 </html>
+

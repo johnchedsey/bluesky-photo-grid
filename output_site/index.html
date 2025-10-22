@@ -3,17 +3,19 @@
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta charset="UTF-8">
-  <title>{{ WEBSITE_TITLE }}</title>
-  <link rel="alternate" type="application/rss+xml" title="{{ WEBSITE_TITLE }} RSS" href="feed.xml">
+  <title>Robot Impurity On Bluesky</title>
+  <link rel="alternate" type="application/rss+xml" title="Robot Impurity On Bluesky RSS" href="feed.xml">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/css/lightgallery.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1 data-cy="website-title">{{ WEBSITE_TITLE }}</h1>
-  <h3 class="subtitle" data-cy="website-subtitle">{{ WEBSITE_SUBTITLE }}</h3>
+  <h1>Robot Impurity On Bluesky</h1>
+  <h3 class="subtitle"><a href="https://www.robotimpurity.com">Robot Impurity Photography</a>
+<a href="mailto:robotimpurity@gmail.com">Email Me!</a>
+</h3>
   <hr class="modern-hr">
 
-  <div id="lightgallery" class="grid" data-cy="gallery-grid"></div>
+  <div id="lightgallery" class="grid"></div>
 
 <div class="pagination">
   <button id="prev-btn" data-cy="prev-button">Previous</button>
@@ -23,7 +25,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/lightgallery.min.js"></script>
   <script>
-    const useHighResTile = {{ 'true' if config.output.highres_tile else 'false' }};
+    const useHighResTile = true;
     const gallery = document.getElementById('lightgallery');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
@@ -85,7 +87,6 @@
         const anchor = document.createElement('a');
         anchor.href = img.src;
         anchor.dataset.index = idx;
-        anchor.dataset.cy = idx === 0 ? 'first-grid-item' : `grid-item-${idx}`;
         anchor.dataset.subHtml = `
           <div class='lg-sub-html'>
             <span class='description'>${img.description}</span><br>
@@ -94,7 +95,7 @@
           </div>`;
         anchor.innerHTML = `<img src="${useHighResTile ? img.src : img.thumb}" loading="lazy">`;
         gallery.appendChild(anchor);
-});
+      });
 
       if (lg) lg.destroy();
       lg = lightGallery(gallery, { selector: 'a', download: false, counter: false });
@@ -173,7 +174,8 @@
   </script>
 
   <hr class="modern-hr">
-  <h3 class="footer">{{ WEBSITE_FOOTER }}</h3>
+  <h3 class="footer">(c) Robot Impurity <script>document.write(new Date().getFullYear())</script>
+</h3>
   <h3 class="footer">
     <a href="https://github.com/nkavassalis/bluesky-photo-grid">Powered by Bluesky Photo Grid</a>
   </h3>
