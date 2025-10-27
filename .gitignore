@@ -1,6 +1,6 @@
 *.yaml
-cypress.config.js
 index_template.html.old
 .gitgnore
 /output_site
 /public
+.env

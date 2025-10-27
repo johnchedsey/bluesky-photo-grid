@@ -57,7 +57,7 @@ def get_session(handle, password):
     return data["accessJwt"], data["did"]
 
 
-def fetch_all_posts(handle, jwt, limit=100, max_posts=1000):
+def fetch_all_posts(handle, jwt, limit=100, max_posts=1000, retries=3, backoff=5):
     headers = {"Authorization": f"Bearer {jwt}"}
     cursor = None
     all_posts = []
@@ -70,9 +70,22 @@ def fetch_all_posts(handle, jwt, limit=100, max_posts=1000):
         if cursor:
             url += f"&cursor={quote(cursor)}"
 
-        resp = requests.get(url, headers=headers, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
+        attempt = 0
+        while attempt <= retries:
+            try:
+                resp = requests.get(url, headers=headers, timeout=20)
+                resp.raise_for_status()
+                data = resp.json()
+                break  # Success, exit retry loop
+            except (requests.RequestException, requests.HTTPError) as e:
+                attempt += 1
+                if attempt > retries:
+                    print(f"[ERROR] Failed to fetch posts after {retries} retries: {e}")
+                    print(f"[INFO] Returning {len(all_posts)} posts collected so far")
+                    return all_posts[:max_posts]
+                wait = backoff * attempt
+                print(f"[WARN] API error ({e}), retrying in {wait}s... (attempt {attempt}/{retries})")
+                time.sleep(wait)
 
         feed = data.get("feed", [])
         if not feed:
@@ -124,7 +137,7 @@ def download_image(url, save_path, retries=3, backoff=5):
             attempt += 1
             if attempt > retries:
                 print(f"[WARN] Failed to download {url} after {retries} retries: {e}")
-                return  # skip, but don’t crash everything
+                return  # skip, but don't crash everything
             wait = backoff * attempt
             print(f"[INFO] Error fetching {url} ({e}), retrying in {wait}s...")
             time.sleep(wait)
@@ -144,6 +157,11 @@ def extract_images(posts, handle, output_dir, host_images=False, hashtag="#photo
         uri = post.get("uri")
         embed = post.get("embed", {})
         created_at = post.get("record", {}).get("createdAt", "")[:10]
+        
+        # Extract engagement metrics
+        like_count = post.get("likeCount", 0)
+        repost_count = post.get("repostCount", 0)
+        reply_count = post.get("replyCount", 0)
 
         if "images" in embed:
             for img in embed["images"]:
@@ -168,7 +186,10 @@ def extract_images(posts, handle, output_dir, host_images=False, hashtag="#photo
                         "thumb": thumb,
                         "link": link,
                         "description": description,
-                        "date": created_at
+                        "date": created_at,
+                        "likes": like_count,
+                        "reposts": repost_count,
+                        "replies": reply_count
                     })
     return images
 
@@ -284,7 +305,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     jwt, _ = get_session(config["bluesky"]["handle"], config["bluesky"]["app_password"])
-    posts = fetch_all_posts(config["bluesky"]["handle"], jwt, config["bluesky"]["max_posts"])
+    posts = fetch_all_posts(config["bluesky"]["handle"], jwt, max_posts=config["bluesky"]["max_posts"])
     images = extract_images(
         posts,
         config["bluesky"]["handle"],
@@ -298,4 +319,3 @@ if __name__ == "__main__":
     copy_style_css(output_dir)
     generate_rss_feed(images, output_dir, config)  
     sync_files(output_dir, hashes_file, config["cdn"], config)
-

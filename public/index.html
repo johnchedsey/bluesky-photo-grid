@@ -7,21 +7,84 @@
   <link rel="alternate" type="application/rss+xml" title="Robot Impurity On Bluesky RSS" href="feed.xml">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/css/lightgallery.min.css">
   <link rel="stylesheet" href="style.css">
+  <style>
+    .controls-wrapper {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      margin: 20px 0;
+      flex-wrap: wrap;
+    }
+    .sort-control {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 10px 20px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    }
+    .sort-control label {
+      font-size: 16px;
+      color: #ddd;
+      user-select: none;
+    }
+    .sort-control select {
+      padding: 8px 12px;
+      background: linear-gradient(to bottom, #444, #333);
+      border: none;
+      color: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.1s ease;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+      font-size: 16px;
+      min-width: 150px;
+    }
+    .sort-control select:hover {
+      background: linear-gradient(to bottom, #555, #444);
+      transform: translateY(-1px);
+    }
+    .sort-control select:focus {
+      outline: 2px solid #666;
+      outline-offset: 2px;
+    }
+    .sort-control select option {
+      background: #333;
+      color: #fff;
+    }
+  </style>
 </head>
 <body>
-  <h1>Robot Impurity On Bluesky</h1>
-  <h3 class="subtitle"><a href="https://www.robotimpurity.com">Robot Impurity Photography</a>
+  <h1 data-cy="website-title">Robot Impurity On Bluesky</h1>
+  <h3 class="subtitle" data-cy="website-subtitle"><a href="https://www.robotimpurity.com">Robot Impurity Photography</a>
 <a href="mailto:robotimpurity@gmail.com">Email Me!</a>
 </h3>
   <hr class="modern-hr">
 
-  <div id="lightgallery" class="grid"></div>
+  <div class="controls-wrapper">
+    <div class="sort-control">
+      <label for="sort-select">Sort by:</label>
+      <select id="sort-select" aria-label="Sort images" data-cy="sort-select">
+        <option value="date-desc">Newest First</option>
+        <option value="date-asc">Oldest First</option>
+        <option value="likes-desc">Most Likes</option>
+        <option value="likes-asc">Least Likes</option>
+        <option value="reposts-desc">Most Reposts</option>
+        <option value="replies-desc">Most Replies</option>
+      </select>
+    </div>
+  </div>
 
-<div class="pagination">
-  <button id="prev-btn" data-cy="prev-button">Previous</button>
-  <select id="page-select" aria-label="Jump to page" data-cy="page-select"></select>
-  <button id="next-btn" data-cy="next-button">Next</button>
-</div>
+  <div id="lightgallery" class="grid" data-cy="gallery-grid"></div>
+
+  <div class="pagination">
+    <button id="prev-btn" data-cy="prev-button">Previous</button>
+    <select id="page-select" aria-label="Jump to page" data-cy="page-select"></select>
+    <button id="next-btn" data-cy="next-button">Next</button>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/lightgallery.min.js"></script>
   <script>
@@ -30,8 +93,10 @@
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const pageSelect = document.getElementById('page-select');
+    const sortSelect = document.getElementById('sort-select');
 
     let lg = null;
+    let allImages = [];
     let images = [];
     const pageSize = 25;
     let currentPageImages = [];
@@ -43,11 +108,44 @@
       return (!isNaN(page) && page > 0) ? page : 1;
     }
 
-    function setPageInURL(page) {
+    function getSortFromURL() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('sort') || 'date-desc';
+    }
+
+    function setURLParams(page, sort) {
       const params = new URLSearchParams(window.location.search);
       params.set('page', page);
+      params.set('sort', sort);
       const newUrl = location.pathname + '?' + params.toString() + location.hash;
-      window.history.pushState({page}, '', newUrl);
+      window.history.pushState({page, sort}, '', newUrl);
+    }
+
+    function sortImages(sortBy) {
+      const sorted = [...allImages];
+      
+      switch(sortBy) {
+        case 'date-desc':
+          sorted.sort((a, b) => b.date.localeCompare(a.date));
+          break;
+        case 'date-asc':
+          sorted.sort((a, b) => a.date.localeCompare(b.date));
+          break;
+        case 'likes-desc':
+          sorted.sort((a, b) => b.likes - a.likes);
+          break;
+        case 'likes-asc':
+          sorted.sort((a, b) => a.likes - b.likes);
+          break;
+        case 'reposts-desc':
+          sorted.sort((a, b) => b.reposts - a.reposts);
+          break;
+        case 'replies-desc':
+          sorted.sort((a, b) => b.replies - a.replies);
+          break;
+      }
+      
+      return sorted;
     }
 
     function populatePageSelect(totalPages, currentPage) {
@@ -69,7 +167,12 @@
         console.error("Failed to load images.json");
         return;
       }
-      images = await response.json();
+      allImages = await response.json();
+      
+      const sortBy = getSortFromURL();
+      sortSelect.value = sortBy;
+      images = sortImages(sortBy);
+      
       renderPage(getPageFromURL());
       if (initialLoad) {
         initialLoad = false;
@@ -87,10 +190,11 @@
         const anchor = document.createElement('a');
         anchor.href = img.src;
         anchor.dataset.index = idx;
+        anchor.dataset.cy = idx === 0 ? 'first-grid-item' : `grid-item-${idx}`;
         anchor.dataset.subHtml = `
           <div class='lg-sub-html'>
             <span class='description'>${img.description}</span><br>
-            <span class='post-info'>Posted on ${img.date}
+            <span class='post-info'>Posted on ${img.date} | ❤️ ${img.likes} | 🔄 ${img.reposts} | 💬 ${img.replies}
             <a href='${img.link}' target='_blank'>View it on Bluesky</a></span>
           </div>`;
         anchor.innerHTML = `<img src="${useHighResTile ? img.src : img.thumb}" loading="lazy">`;
@@ -120,7 +224,7 @@
 
       updatePagination(page);
       window.scrollTo(0, 0);
-      if (updateHistory) setPageInURL(page);
+      if (updateHistory) setURLParams(page, sortSelect.value);
     }
 
     async function openGalleryFromAnchor() {
@@ -161,8 +265,18 @@
     prevBtn.onclick = () => renderPage(getPageFromURL() - 1);
     nextBtn.onclick = () => renderPage(getPageFromURL() + 1);
     pageSelect.onchange = () => renderPage(parseInt(pageSelect.value));
+    
+    sortSelect.onchange = () => {
+      images = sortImages(sortSelect.value);
+      renderPage(1);
+    };
 
-    window.onpopstate = () => renderPage(getPageFromURL(), false);
+    window.onpopstate = () => {
+      const sortBy = getSortFromURL();
+      sortSelect.value = sortBy;
+      images = sortImages(sortBy);
+      renderPage(getPageFromURL(), false);
+    };
 
     document.addEventListener('keydown', (e) => {
       if (lg && lg.lgOpened) return;
