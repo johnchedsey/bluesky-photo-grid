@@ -221,6 +221,24 @@ def copy_style_css(output_dir):
     dst_css = output_dir / "style.css"
     dst_css.write_text(src_css.read_text(encoding="utf-8"), encoding="utf-8")
 
+def copy_favicon(output_dir):
+    # Try PNG first
+    src_favicon = Path(__file__).parent / "favicon.png"
+    if src_favicon.exists():
+        dst_favicon = output_dir / "favicon.png"
+        dst_favicon.write_bytes(src_favicon.read_bytes())
+    
+    # Try SVG
+    src_favicon_svg = Path(__file__).parent / "favicon.svg"
+    if src_favicon_svg.exists():
+        dst_favicon_svg = output_dir / "favicon.svg"
+        dst_favicon_svg.write_text(src_favicon_svg.read_text(encoding="utf-8"), encoding="utf-8")
+    
+    # Try ICO
+    src_favicon_ico = Path(__file__).parent / "favicon.ico"
+    if src_favicon_ico.exists():
+        dst_favicon_ico = output_dir / "favicon.ico"
+        dst_favicon_ico.write_bytes(src_favicon_ico.read_bytes())
 
 def compute_hash(file_path):
     hasher = hashlib.md5()
@@ -317,5 +335,9 @@ if __name__ == "__main__":
     save_images_json(images, output_dir)
     render_template(output_dir, config)
     copy_style_css(output_dir)
+    render_template(output_dir, config)
+    copy_style_css(output_dir)
+    copy_favicon(output_dir)  # Add this line
+    generate_rss_feed(images, output_dir, config)
     generate_rss_feed(images, output_dir, config)  
     sync_files(output_dir, hashes_file, config["cdn"], config)
