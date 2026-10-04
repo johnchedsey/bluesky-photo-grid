@@ -1,86 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta charset="UTF-8">
-  <title>{{ WEBSITE_TITLE }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ config.website.title }}</title>
   <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="alternate" type="application/rss+xml" title="{{ WEBSITE_TITLE }} RSS" href="feed.xml">
+  <link rel="alternate" type="application/rss+xml" title="{{ config.website.title }} RSS" href="feed.xml">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/css/lightgallery.min.css">
   <link rel="stylesheet" href="style.css">
-  <style>
-    .controls-wrapper {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 20px;
-      margin: 20px 0;
-      flex-wrap: wrap;
-    }
-    .sort-control {
-      display: inline-flex;
-      gap: 10px;
-      align-items: center;
-      justify-content: center;
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 8px;
-      padding: 10px 20px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-    }
-    .sort-control label {
-      font-size: 16px;
-      color: #ddd;
-      user-select: none;
-    }
-    .sort-control select {
-      padding: 8px 12px;
-      background: linear-gradient(to bottom, #444, #333);
-      border: none;
-      color: #fff;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background 0.2s ease, transform 0.1s ease;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-      font-size: 16px;
-      min-width: 150px;
-    }
-    .sort-control select:hover {
-      background: linear-gradient(to bottom, #555, #444);
-      transform: translateY(-1px);
-    }
-    .sort-control select:focus {
-      outline: 2px solid #666;
-      outline-offset: 2px;
-    }
-    .sort-control select option {
-      background: #333;
-      color: #fff;
-    }
-  </style>
 </head>
 <body>
-  <h1 data-cy="website-title">{{ WEBSITE_TITLE }}</h1>
-  <h3 class="subtitle" data-cy="website-subtitle">{{ WEBSITE_SUBTITLE }}</h3>
+  <h1 data-cy="website-title">{{ config.website.title }}</h1>
+  <h3 class="subtitle" data-cy="website-subtitle">{{ config.website.subtitle }}</h3>
+  <div class="nsfw-toggle-wrapper">
+    <label class="nsfw-toggle" for="nsfw-toggle" title="Show or hide NSFW images">
+      <input type="checkbox" id="nsfw-toggle" data-cy="nsfw-toggle" aria-label="Show NSFW images">
+      <span class="nsfw-toggle-track">
+        <span class="nsfw-toggle-thumb"></span>
+      </span>
+      <span class="nsfw-toggle-label">Show NSFW</span>
+    </label>
+  </div>
   <hr class="modern-hr">
 
-  <div class="controls-wrapper">
-    <div class="sort-control">
-      <label for="sort-select">Sort by:</label>
-      <select id="sort-select" aria-label="Sort images" data-cy="sort-select">
-        <option value="date-desc">Newest First</option>
-        <option value="date-asc">Oldest First</option>
-        <option value="likes-desc">Most Likes</option>
-        <option value="likes-asc">Least Likes</option>
-        <option value="reposts-desc">Most Reposts</option>
-        <option value="replies-desc">Most Replies</option>
-      </select>
-    </div>
+  <div class="controls">
+    <label for="sort-select">Sort by:</label>
+    <select id="sort-select" aria-label="Sort images" data-cy="sort-select">
+      <option value="date-desc">Newest First</option>
+      <option value="date-asc">Oldest First</option>
+      <option value="likes-desc">Most Likes</option>
+      <option value="likes-asc">Least Likes</option>
+      <option value="reposts-desc">Most Reposts</option>
+      <option value="replies-desc">Most Replies</option>
+    </select>
   </div>
 
   <div id="lightgallery" class="grid" data-cy="gallery-grid"></div>
 
-  <div class="pagination">
+  <div class="controls pagination">
     <button id="prev-btn" data-cy="prev-button">Previous</button>
     <select id="page-select" aria-label="Jump to page" data-cy="page-select"></select>
     <button id="next-btn" data-cy="next-button">Next</button>
@@ -88,270 +46,166 @@
 
   <script src="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/lightgallery.min.js"></script>
   <script>
-    const useHighResTile = {{ 'true' if config.output.highres_tile else 'false' }};
+    const PAGE_SIZE = {{ config.output.posts_per_page | int }};
+    const USE_HIGHRES_TILE = {{ config.output.highres_tile | tojson }};
+    const SORTS = {
+      'date-desc': (a, b) => b.date.localeCompare(a.date),
+      'date-asc': (a, b) => a.date.localeCompare(b.date),
+      'likes-desc': (a, b) => b.likes - a.likes,
+      'likes-asc': (a, b) => a.likes - b.likes,
+      'reposts-desc': (a, b) => b.reposts - a.reposts,
+      'replies-desc': (a, b) => b.replies - a.replies,
+    };
+    const DEFAULT_SORT = 'date-desc';
+
     const gallery = document.getElementById('lightgallery');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const pageSelect = document.getElementById('page-select');
     const sortSelect = document.getElementById('sort-select');
+    const nsfwToggle = document.getElementById('nsfw-toggle');
 
     let lg = null;
     let allImages = [];
-    let images = [];
-    const pageSize = 25;
-    let currentPageImages = [];
-    let initialLoad = true;
+    let images = [];          // allImages after NSFW filter + sort
+    let pageImages = [];      // images shown on the current page
+    let currentPage = 1;
 
-    function getPageFromURL() {
-      const params = new URLSearchParams(window.location.search);
-      const page = parseInt(params.get('page'));
-      return (!isNaN(page) && page > 0) ? page : 1;
+    function escapeHtml(text) {
+      return String(text).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
     }
 
-    function getSortFromURL() {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('sort') || 'date-desc';
+    function readURL() {
+      const params = new URLSearchParams(location.search);
+      const page = parseInt(params.get('page'), 10);
+      const sort = params.get('sort');
+      return {
+        page: page > 0 ? page : 1,
+        sort: sort in SORTS ? sort : DEFAULT_SORT,
+      };
     }
 
-    function setURLParams(page, sort) {
-      const params = new URLSearchParams(window.location.search);
-      params.set('page', page);
-      params.set('sort', sort);
-      const newUrl = location.pathname + '?' + params.toString() + location.hash;
-      window.history.pushState({page, sort}, '', newUrl);
+    function writeURL(push) {
+      const params = new URLSearchParams(location.search);
+      params.set('page', currentPage);
+      params.set('sort', sortSelect.value);
+      const url = `${location.pathname}?${params}${location.hash}`;
+      if (push) history.pushState(null, '', url);
+      else history.replaceState(null, '', url);
     }
 
-    function sortImages(sortBy) {
-      const sorted = [...allImages];
-      
-      switch(sortBy) {
-        case 'date-desc':
-          sorted.sort((a, b) => b.date.localeCompare(a.date));
-          break;
-        case 'date-asc':
-          sorted.sort((a, b) => a.date.localeCompare(b.date));
-          break;
-        case 'likes-desc':
-          sorted.sort((a, b) => b.likes - a.likes);
-          break;
-        case 'likes-asc':
-          sorted.sort((a, b) => a.likes - b.likes);
-          break;
-        case 'reposts-desc':
-          sorted.sort((a, b) => b.reposts - a.reposts);
-          break;
-        case 'replies-desc':
-          sorted.sort((a, b) => b.replies - a.replies);
-          break;
-      }
-      
-      return sorted;
+    function setImageHash(index) {
+      const base = location.pathname + location.search;
+      const img = pageImages[index];
+      history.replaceState(null, '', img ? `${base}#img-${encodeURIComponent(img.id)}` : base);
     }
 
-    function populatePageSelect(totalPages, currentPage) {
-      pageSelect.innerHTML = '';
-      for (let i = 1; i <= totalPages; i++) {
-        const option = document.createElement('option');
-        option.value = i;
-        option.textContent = `Page ${i} of ${totalPages}`;
-        if (i === currentPage) {
-          option.selected = true;
-        }
-        pageSelect.appendChild(option);
-      }
+    function applyFilterAndSort() {
+      const pool = nsfwToggle.checked ? allImages : allImages.filter(img => !img.nsfw);
+      images = [...pool].sort(SORTS[sortSelect.value]);
     }
 
-    async function loadImages() {
-      const response = await fetch('data/images.json');
-      if (!response.ok) {
-        console.error("Failed to load images.json");
-        return;
-      }
-      allImages = await response.json();
-      
-      const sortBy = getSortFromURL();
-      sortSelect.value = sortBy;
-      images = sortImages(sortBy);
-      
-      renderPage(getPageFromURL());
-      if (initialLoad) {
-        initialLoad = false;
-        setTimeout(openGalleryFromAnchor, 0);
-      }
+    function totalPages() {
+      return Math.max(1, Math.ceil(images.length / PAGE_SIZE));
     }
 
-    function renderPage(page, updateHistory = true) {
-      gallery.innerHTML = '';
-      const start = (page - 1) * pageSize;
-      const end = start + pageSize;
-      currentPageImages = images.slice(start, end);
+    function createTile(img, idx) {
+      const anchor = document.createElement('a');
+      anchor.href = img.src;
+      anchor.dataset.cy = idx === 0 ? 'first-grid-item' : `grid-item-${idx}`;
+      anchor.dataset.subHtml = `
+        <div class='lg-sub-html'>
+          <span class='description'>${escapeHtml(img.description)}</span><br>
+          <span class='post-info'>Posted on ${escapeHtml(img.date)} | ❤️ ${img.likes} | 🔄 ${img.reposts} | 💬 ${img.replies}
+          <a href='${escapeHtml(img.link)}' target='_blank' rel='noopener'>View it on Bluesky</a></span>
+        </div>`;
 
-      currentPageImages.forEach((img, idx) => {
-        const anchor = document.createElement('a');
-        anchor.href = img.src;
-        anchor.dataset.index = idx;
-        anchor.dataset.cy = idx === 0 ? 'first-grid-item' : `grid-item-${idx}`;
-        anchor.dataset.subHtml = `
-          <div class='lg-sub-html'>
-            <span class='description'>${img.description}</span><br>
-            <span class='post-info'>Posted on ${img.date} | ❤️ ${img.likes} | 🔄 ${img.reposts} | 💬 ${img.replies}
-            <a href='${img.link}' target='_blank'>View it on Bluesky</a></span>
-          </div>`;
-        
-        const imgElement = document.createElement('img');
-        imgElement.src = useHighResTile ? img.src : img.thumb;
-        imgElement.loading = 'lazy';
-        
-        imgElement.onload = function() {
-          const aspectRatio = this.naturalWidth / this.naturalHeight;
-          const isSmallScreen = window.innerWidth <= 1024;
-          const isMobile = window.innerWidth <= 375;
-          
-          if (isMobile) {
-            anchor.style.gridColumn = 'span 1';
-          } else if (isSmallScreen) {
-            if (aspectRatio > 2.0) {
-              anchor.style.gridColumn = 'span 2';
-            } else {
-              anchor.style.gridColumn = 'span 1';
-            }
-          } else {
-            if (aspectRatio > 2.5) {
-              anchor.style.gridColumn = 'span 4';
-            } else if (aspectRatio > 1.8) {
-              anchor.style.gridColumn = 'span 3';
-            } else if (aspectRatio > 1.3) {
-              anchor.style.gridColumn = 'span 2';
-            } else {
-              anchor.style.gridColumn = 'span 1';
-            }
-          }
-        };
-        
-        anchor.appendChild(imgElement);
-        gallery.appendChild(anchor);
-      });
+      const tile = document.createElement('img');
+      tile.src = USE_HIGHRES_TILE ? img.src : img.thumb;
+      tile.alt = img.alt || '';
+      tile.loading = 'lazy';
+      anchor.appendChild(tile);
+      return anchor;
+    }
 
+    // urlMode: 'push' adds an entry, 'replace' rewrites the current one, 'none' leaves the URL alone.
+    function renderPage(page, urlMode = 'push') {
+      currentPage = Math.min(Math.max(1, page), totalPages());
+      const start = (currentPage - 1) * PAGE_SIZE;
+      pageImages = images.slice(start, start + PAGE_SIZE);
+
+      gallery.replaceChildren(...pageImages.map(createTile));
       if (lg) lg.destroy();
       lg = lightGallery(gallery, { selector: 'a', download: false, counter: false });
 
-      gallery.addEventListener('lgAfterOpen', (event) => {
-        if(event.detail){
-          const idx = event.detail.index;
-          const imgId = currentPageImages[idx].id;
-          history.replaceState(null, '', location.pathname + location.search + `#img-${encodeURIComponent(imgId)}`);
-        }
-      });
-
-      gallery.addEventListener('lgAfterSlide', (event) => {
-        const idx = event.detail.index;
-        const imgId = currentPageImages[idx].id;
-        history.replaceState(null, '', location.pathname + location.search + `#img-${encodeURIComponent(imgId)}`);
-      });
-
-      gallery.addEventListener('lgAfterClose', () => {
-        history.replaceState(null, '', location.pathname + location.search);
-      });
-
-      updatePagination(page);
-      window.scrollTo(0, 0);
-      if (updateHistory) setURLParams(page, sortSelect.value);
-    }
-
-    async function openGalleryFromAnchor() {
-      const hash = window.location.hash;
-      if (hash.startsWith('#img-')) {
-        const imgId = decodeURIComponent(hash.slice(5));
-        const imgIndex = images.findIndex(img => img.id === imgId);
-        if (imgIndex !== -1) {
-          const targetPage = Math.floor(imgIndex / pageSize) + 1;
-          const indexOnPage = imgIndex % pageSize;
-          if (getPageFromURL() !== targetPage) {
-            renderPage(targetPage, false);
-          }
-          await waitForGallery();
-          lg.openGallery(indexOnPage);
-        }
-      }
-    }
-
-    function waitForGallery() {
-      return new Promise((resolve) => {
-        const checkGallery = setInterval(() => {
-          if (lg && gallery.querySelector('a')) {
-            clearInterval(checkGallery);
-            resolve();
-          }
-        }, 100);
-      });
-    }
-
-    function updatePagination(currentPage) {
-      const totalPages = Math.ceil(images.length / pageSize);
-      populatePageSelect(totalPages, currentPage);
+      pageSelect.replaceChildren(...Array.from({ length: totalPages() }, (_, i) => {
+        const n = i + 1;
+        return new Option(`Page ${n} of ${totalPages()}`, n, false, n === currentPage);
+      }));
       prevBtn.disabled = currentPage === 1;
-      nextBtn.disabled = currentPage === totalPages;
+      nextBtn.disabled = currentPage === totalPages();
+
+      window.scrollTo(0, 0);
+      if (urlMode !== 'none') writeURL(urlMode === 'push');
     }
 
-    prevBtn.onclick = () => renderPage(getPageFromURL() - 1);
-    nextBtn.onclick = () => renderPage(getPageFromURL() + 1);
-    pageSelect.onchange = () => renderPage(parseInt(pageSelect.value));
-    
-    sortSelect.onchange = () => {
-      images = sortImages(sortSelect.value);
+    function openImageFromHash() {
+      if (!location.hash.startsWith('#img-')) return;
+      const id = decodeURIComponent(location.hash.slice(5));
+      const index = images.findIndex(img => img.id === id);
+      if (index === -1) return;
+      renderPage(Math.floor(index / PAGE_SIZE) + 1, 'replace');
+      lg.openGallery(index % PAGE_SIZE);
+    }
+
+    async function init() {
+      const response = await fetch('data/images.json');
+      if (!response.ok) {
+        console.error('Failed to load images.json');
+        return;
+      }
+      allImages = await response.json();
+
+      const { page, sort } = readURL();
+      sortSelect.value = sort;
+      applyFilterAndSort();
+      renderPage(page, 'replace');
+      openImageFromHash();
+    }
+
+    // These are attached once; lightGallery dispatches them on the gallery element.
+    gallery.addEventListener('lgAfterOpen', () => setImageHash(lg.index));
+    gallery.addEventListener('lgAfterSlide', (event) => setImageHash(event.detail.index));
+    gallery.addEventListener('lgAfterClose', () => setImageHash(-1));
+
+    prevBtn.onclick = () => renderPage(currentPage - 1);
+    nextBtn.onclick = () => renderPage(currentPage + 1);
+    pageSelect.onchange = () => renderPage(parseInt(pageSelect.value, 10));
+    sortSelect.onchange = nsfwToggle.onchange = () => {
+      applyFilterAndSort();
       renderPage(1);
     };
 
     window.onpopstate = () => {
-      const sortBy = getSortFromURL();
-      sortSelect.value = sortBy;
-      images = sortImages(sortBy);
-      renderPage(getPageFromURL(), false);
+      const { page, sort } = readURL();
+      sortSelect.value = sort;
+      applyFilterAndSort();
+      renderPage(page, 'none');
     };
 
-    window.addEventListener('resize', () => {
-      const isSmallScreen = window.innerWidth <= 1024;
-      const isMobile = window.innerWidth <= 375;
-      
-      gallery.querySelectorAll('a').forEach(anchor => {
-        const img = anchor.querySelector('img');
-        if (img && img.complete) {
-          const aspectRatio = img.naturalWidth / img.naturalHeight;
-          
-          if (isMobile) {
-            anchor.style.gridColumn = 'span 1';
-          } else if (isSmallScreen) {
-            if (aspectRatio > 2.0) {
-              anchor.style.gridColumn = 'span 2';
-            } else {
-              anchor.style.gridColumn = 'span 1';
-            }
-          } else {
-            if (aspectRatio > 2.5) {
-              anchor.style.gridColumn = 'span 4';
-            } else if (aspectRatio > 1.8) {
-              anchor.style.gridColumn = 'span 3';
-            } else if (aspectRatio > 1.3) {
-              anchor.style.gridColumn = 'span 2';
-            } else {
-              anchor.style.gridColumn = 'span 1';
-            }
-          }
-        }
-      });
-    });
-
     document.addEventListener('keydown', (e) => {
-      if (lg && lg.lgOpened) return;
+      if ((lg && lg.lgOpened) || e.target.closest('select, input')) return;
       if (e.key === 'ArrowLeft' && !prevBtn.disabled) prevBtn.click();
       else if (e.key === 'ArrowRight' && !nextBtn.disabled) nextBtn.click();
     });
 
-    loadImages();
+    init();
   </script>
 
   <hr class="modern-hr">
-  <h3 class="footer">{{ WEBSITE_FOOTER }}</h3>
+  <h3 class="footer">{{ config.website.footer }}</h3>
   <h3 class="footer">
     <a href="https://github.com/nkavassalis/bluesky-photo-grid">Powered by Bluesky Photo Grid</a>
   </h3>

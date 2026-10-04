@@ -1,343 +1,321 @@
 #!/usr/bin/env python3
-import sys
-import requests
+"""Build a static photo gallery site from a Bluesky account and publish it to a CDN."""
 import hashlib
-import yaml
 import json
-import datetime
+import shutil
+import sys
+from datetime import datetime, timezone
+from email.utils import format_datetime
 from pathlib import Path
-from urllib.parse import quote
-from cdn import get_cdn
-from jinja2 import Environment, FileSystemLoader
 from xml.sax.saxutils import escape
 
-def validate_config(config):
-    required_keys = {
-        "bluesky": ["handle", "app_password"],
-        "output": ["directory", "posts_per_page"],
-        "website": ["title", "subtitle", "footer", "base_url"],
-        "cdn": ["type"]
-    }
-
-    missing_keys = []
-
-    for section, keys in required_keys.items():
-        if section not in config:
-            missing_keys.append(section)
-            continue
-
-        for key in keys:
-            if key not in config[section]:
-                missing_keys.append(f"{section}.{key}")
-
-    if missing_keys:
-        raise KeyError("Missing required config keys: " + ", ".join(missing_keys))
-
-    if "highres_tile" not in config["output"]:
-        config["output"]["highres_tile"] = False
-
-    if "host_images" not in config["output"]:
-        config["output"]["host_images"] = False
- 
-    if "max_posts" not in config["bluesky"]:
-        config["bluesky"]["max_posts"] = 1000
-
-    if "hashtag" not in config["bluesky"]:
-        config["bluesky"]["hashtag"] = "#photography"
-
-    if "show_nsfw" not in config["bluesky"]:
-        config["bluesky"]["show_nsfw"] = False
-
-
-def get_session(handle, password):
-    url = "https://bsky.social/xrpc/com.atproto.server.createSession"
-    resp = requests.post(url, json={"identifier": handle, "password": password})
-    resp.raise_for_status()
-    data = resp.json()
-    return data["accessJwt"], data["did"]
-
-
-def fetch_all_posts(handle, jwt, limit=100, max_posts=1000, retries=3, backoff=5):
-    headers = {"Authorization": f"Bearer {jwt}"}
-    cursor = None
-    all_posts = []
-
-    while len(all_posts) < max_posts:
-        remaining = max_posts - len(all_posts)
-        current_limit = min(limit, remaining, 100)  # API max is 100 per call
-
-        url = f"https://bsky.social/xrpc/app.bsky.feed.getAuthorFeed?actor={handle}&limit={current_limit}"
-        if cursor:
-            url += f"&cursor={quote(cursor)}"
-
-        attempt = 0
-        while attempt <= retries:
-            try:
-                resp = requests.get(url, headers=headers, timeout=20)
-                resp.raise_for_status()
-                data = resp.json()
-                break  # Success, exit retry loop
-            except (requests.RequestException, requests.HTTPError) as e:
-                attempt += 1
-                if attempt > retries:
-                    print(f"[ERROR] Failed to fetch posts after {retries} retries: {e}")
-                    print(f"[INFO] Returning {len(all_posts)} posts collected so far")
-                    return all_posts[:max_posts]
-                wait = backoff * attempt
-                print(f"[WARN] API error ({e}), retrying in {wait}s... (attempt {attempt}/{retries})")
-                time.sleep(wait)
-
-        feed = data.get("feed", [])
-        if not feed:
-            break
-
-        true_posts = [
-            item for item in feed
-            if 'reason' not in item and 'reply' not in item.get('post', {}).get('record', {})
-        ]
-
-        all_posts.extend(true_posts)
-
-        cursor = data.get("cursor")
-        if not cursor:
-            break
-
-    return all_posts[:max_posts]
-
-
-import time
 import requests
+import yaml
+from jinja2 import Environment, FileSystemLoader
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-def post_has_moderation_label(post, show_nsfw=False):
-    if show_nsfw:
-        return False
-    labels = post.get("labels", [])
-    blocked_values = {"porn", "sexual", "nudity", "graphic-media", "spam", "!hide", "!warn"}
-    return any(label.get("val") in blocked_values for label in labels)
+from cdn import get_cdn
 
-def has_target_hashtag(text, hashtag="#photography"):
+ROOT = Path(__file__).parent
+API_BASE = "https://bsky.social/xrpc"
+REQUEST_TIMEOUT = 20
+FAVICONS = ("favicon.png", "favicon.svg", "favicon.ico")
+NSFW_LABELS = {"porn", "sexual", "nudity", "graphic-media", "spam", "!hide", "!warn"}
+
+REQUIRED_KEYS = {
+    "bluesky": ["handle", "app_password"],
+    "output": ["directory", "posts_per_page"],
+    "website": ["title", "subtitle", "footer", "base_url"],
+    "cdn": ["type"],
+}
+DEFAULTS = {
+    "bluesky": {"max_posts": 1000, "hashtag": "#photography"},
+    "output": {"highres_tile": False, "host_images": False},
+}
+
+
+# --- Config ---------------------------------------------------------------
+
+def load_config(path):
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    missing = []
+    for section, keys in REQUIRED_KEYS.items():
+        if section not in config:
+            missing.append(section)
+            continue
+        missing.extend(f"{section}.{key}" for key in keys if key not in config[section])
+    if missing:
+        raise KeyError("Missing required config keys: " + ", ".join(missing))
+
+    for section, defaults in DEFAULTS.items():
+        for key, value in defaults.items():
+            config[section].setdefault(key, value)
+    return config
+
+
+# --- Bluesky API ----------------------------------------------------------
+
+def make_http_session():
+    """A requests session that retries transient failures with backoff."""
+    retry = Retry(
+        total=3,
+        backoff_factor=2,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET",),
+    )
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
+
+
+def login(http, handle, password):
+    resp = http.post(
+        f"{API_BASE}/com.atproto.server.createSession",
+        json={"identifier": handle, "password": password},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()["accessJwt"]
+
+
+def is_original_post(item):
+    """Exclude reposts (which carry a 'reason') and replies."""
+    return "reason" not in item and "reply" not in item.get("post", {}).get("record", {})
+
+
+def fetch_posts(http, handle, jwt, max_posts):
+    """Fetch up to max_posts original posts (no reposts/replies) from the author feed."""
+    headers = {"Authorization": f"Bearer {jwt}"}
+    posts = []
+    cursor = None
+    while len(posts) < max_posts:
+        params = {"actor": handle, "limit": 100}  # API max per call
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            resp = http.get(
+                f"{API_BASE}/app.bsky.feed.getAuthorFeed", params=params, headers=headers, timeout=REQUEST_TIMEOUT
+            )
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            print(f"[ERROR] Failed to fetch posts: {e}")
+            print(f"[INFO] Continuing with {len(posts)} posts collected so far")
+            break
+
+        data = resp.json()
+        feed = data.get("feed", [])
+        posts.extend(item for item in feed if is_original_post(item))
+        cursor = data.get("cursor")
+        if not feed or not cursor:
+            break
+    return posts[:max_posts]
+
+
+# --- Image extraction -----------------------------------------------------
+
+def has_hashtag(text, hashtag):
     return hashtag.lower() in text.lower()
 
 
-def download_image(url, save_path, retries=3, backoff=5):
-    if save_path.exists():
-        return
+def is_nsfw(post):
+    return any(label.get("val") in NSFW_LABELS for label in post.get("labels", []))
 
-    attempt = 0
-    while attempt <= retries:
-        try:
-            resp = requests.get(url, stream=True, timeout=20)
+
+def download(http, url, dest):
+    """Download url to dest unless it already exists. Returns True if dest is present afterwards."""
+    if dest.exists():
+        return True
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(dest.name + ".part")
+    try:
+        with http.get(url, stream=True, timeout=REQUEST_TIMEOUT) as resp:
             resp.raise_for_status()
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(save_path, 'wb') as f:
+            with open(partial, "wb") as f:
                 for chunk in resp.iter_content(8192):
                     f.write(chunk)
-            return  # success, exit function
-        except (requests.RequestException, requests.Timeout) as e:
-            attempt += 1
-            if attempt > retries:
-                print(f"[WARN] Failed to download {url} after {retries} retries: {e}")
-                return  # skip, but don't crash everything
-            wait = backoff * attempt
-            print(f"[INFO] Error fetching {url} ({e}), retrying in {wait}s...")
-            time.sleep(wait)
+        partial.replace(dest)
+        return True
+    except (requests.RequestException, OSError) as e:
+        print(f"[WARN] Failed to download {url}: {e}")
+        partial.unlink(missing_ok=True)
+        return False
 
 
-def extract_images(posts, handle, output_dir, host_images=False, hashtag="#photography", show_nsfw=False):
+def host_image(http, url, output_dir, filename):
+    """Store an image under output_dir/hosted_images; fall back to the remote URL on failure."""
+    dest = output_dir / "hosted_images" / filename
+    return dest.relative_to(output_dir).as_posix() if download(http, url, dest) else url
+
+
+def extract_images(posts, handle, output_dir, http, host_images=False, hashtag="#photography"):
     images = []
     for item in posts:
         post = item.get("post", {})
-        if post_has_moderation_label(post, show_nsfw=show_nsfw):
-            continue  # Skip moderated posts if NSFW is hidden
-
-        description = post.get("record", {}).get("text", "")
-        if not has_target_hashtag(description, hashtag):
-            continue  # Skip posts without desired hashtag
-
+        record = post.get("record", {})
+        description = record.get("text", "")
         uri = post.get("uri")
-        embed = post.get("embed", {})
-        created_at = post.get("record", {}).get("createdAt", "")[:10]
-        
-        # Extract engagement metrics
-        like_count = post.get("likeCount", 0)
-        repost_count = post.get("repostCount", 0)
-        reply_count = post.get("replyCount", 0)
+        if not uri or not has_hashtag(description, hashtag):
+            continue
 
-        if "images" in embed:
-            for img in embed["images"]:
-                src = img.get("fullsize")
-                thumb = img.get("thumb")
-                if src and uri:
-                    rkey = uri.split("/")[-1]
-                    link = f"https://bsky.app/profile/{handle}/post/{rkey}"
+        rkey = uri.split("/")[-1]
+        post_info = {
+            "link": f"https://bsky.app/profile/{handle}/post/{rkey}",
+            "description": description,
+            "date": record.get("createdAt", "")[:10],
+            "likes": post.get("likeCount", 0),
+            "reposts": post.get("repostCount", 0),
+            "replies": post.get("replyCount", 0),
+            "nsfw": is_nsfw(post),
+        }
 
-                    if host_images:
-                        img_path = output_dir / "hosted_images"
-                        src_filename = img_path / f"{rkey}_full.jpg"
-                        thumb_filename = img_path / f"{rkey}_thumb.jpg"
-                        download_image(src, src_filename)
-                        download_image(thumb, thumb_filename)
-                        src = str(src_filename.relative_to(output_dir))
-                        thumb = str(thumb_filename.relative_to(output_dir))
+        for i, img in enumerate(post.get("embed", {}).get("images", [])):
+            src, thumb = img.get("fullsize"), img.get("thumb")
+            if not src:
+                continue
+            # The first image keeps the bare rkey so existing #img- links stay valid.
+            image_id = rkey if i == 0 else f"{rkey}-{i}"
+            if host_images:
+                src = host_image(http, src, output_dir, f"{image_id}_full.jpg")
+                if thumb:
+                    thumb = host_image(http, thumb, output_dir, f"{image_id}_thumb.jpg")
 
-                    images.append({
-                        "id": rkey,
-                        "src": src,
-                        "thumb": thumb,
-                        "link": link,
-                        "description": description,
-                        "date": created_at,
-                        "likes": like_count,
-                        "reposts": repost_count,
-                        "replies": reply_count
-                    })
+            images.append({
+                "id": image_id,
+                "src": src,
+                "thumb": thumb or src,
+                "alt": img.get("alt", ""),
+                **post_info,
+            })
     return images
 
-def save_images_json(images, output_dir):
+
+# --- Site generation ------------------------------------------------------
+
+def write_images_json(images, output_dir):
     json_dir = output_dir / "data"
     json_dir.mkdir(parents=True, exist_ok=True)
-
-    json_file = json_dir / "images.json"
-    with open(json_file, "w") as f:
-        json.dump(images, f, indent=2)
+    (json_dir / "images.json").write_text(json.dumps(images, indent=2), encoding="utf-8")
 
 
-def render_template(output_dir, config):
-    env = Environment(loader=FileSystemLoader(Path(__file__).parent))
-    template = env.get_template("index_template.html")
-    html_output = template.render(
-        WEBSITE_TITLE=config["website"]["title"],
-        WEBSITE_SUBTITLE=config["website"]["subtitle"],
-        WEBSITE_FOOTER=config["website"]["footer"],
-        config=config
-    )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "index.html").write_text(html_output, encoding="utf-8")
+def render_index(output_dir, config):
+    env = Environment(loader=FileSystemLoader(ROOT))
+    html = env.get_template("index_template.html").render(config=config)
+    (output_dir / "index.html").write_text(html, encoding="utf-8")
 
 
-def copy_style_css(output_dir):
-    src_css = Path(__file__).parent / "style.css"
-    dst_css = output_dir / "style.css"
-    dst_css.write_text(src_css.read_text(encoding="utf-8"), encoding="utf-8")
+def copy_static_assets(output_dir):
+    for name in ("style.css", *FAVICONS):
+        src = ROOT / name
+        if src.exists():
+            shutil.copy2(src, output_dir / name)
 
-def copy_favicon(output_dir):
-    # Try PNG first
-    src_favicon = Path(__file__).parent / "favicon.png"
-    if src_favicon.exists():
-        dst_favicon = output_dir / "favicon.png"
-        dst_favicon.write_bytes(src_favicon.read_bytes())
-    
-    # Try SVG
-    src_favicon_svg = Path(__file__).parent / "favicon.svg"
-    if src_favicon_svg.exists():
-        dst_favicon_svg = output_dir / "favicon.svg"
-        dst_favicon_svg.write_text(src_favicon_svg.read_text(encoding="utf-8"), encoding="utf-8")
-    
-    # Try ICO
-    src_favicon_ico = Path(__file__).parent / "favicon.ico"
-    if src_favicon_ico.exists():
-        dst_favicon_ico = output_dir / "favicon.ico"
-        dst_favicon_ico.write_bytes(src_favicon_ico.read_bytes())
 
-def compute_hash(file_path):
+def rss_date(date_str):
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return ""
+    return f"\n      <pubDate>{format_datetime(date, usegmt=True)}</pubDate>"
+
+
+def write_rss_feed(images, output_dir, config, feed_size=25):
+    base_url = config["website"]["base_url"].rstrip("/")
+    title = escape(config["website"]["title"])
+
+    items = []
+    for img in images[:feed_size]:
+        link = escape(f"{base_url}/#img-{img['id']}")
+        items.append(f"""
+    <item>
+      <title>{escape(img['description'][:50])}</title>
+      <link>{link}</link>
+      <description>{escape(img['description'])}</description>{rss_date(img['date'])}
+      <guid>{link}</guid>
+    </item>""")
+
+    feed = f"""<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>{title}</title>
+    <link>{escape(base_url)}</link>
+    <atom:link href="{escape(base_url)}/feed.xml" rel="self" type="application/rss+xml" />
+    <description>{title} RSS feed</description>{''.join(items)}
+  </channel>
+</rss>
+"""
+    (output_dir / "feed.xml").write_text(feed, encoding="utf-8")
+
+
+# --- Publishing -----------------------------------------------------------
+
+def file_hash(path):
     hasher = hashlib.md5()
-    with open(file_path, "rb") as f:
+    with open(path, "rb") as f:
         while chunk := f.read(8192):
             hasher.update(chunk)
     return hasher.hexdigest()
 
-def load_hashes(hashes_file):
-    return json.loads(hashes_file.read_text()) if hashes_file.exists() else {}
+
+def publish_changes(output_dir, config):
+    """Upload files whose content changed since the last run, then record the new hashes."""
+    hashes_file = output_dir / ".file_hashes.json"
+    prev = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
+
+    current = {
+        path.relative_to(output_dir).as_posix(): file_hash(path)
+        for path in output_dir.rglob("*")
+        if path.is_file() and path != hashes_file and not path.name.endswith(".part")
+    }
+    changed = [rel for rel, digest in current.items() if prev.get(rel) != digest]
+
+    if changed:
+        get_cdn(config["cdn"]["type"], config).upload_files(changed, output_dir)
+    else:
+        print("No changes to upload.")
+
+    hashes_file.write_text(json.dumps(current, indent=2), encoding="utf-8")
 
 
-def save_hashes(hashes, hashes_file):
-    hashes_file.write_text(json.dumps(hashes, indent=2))
+# --- Entry point ----------------------------------------------------------
 
-def generate_rss_feed(images, output_dir, config, feed_size=25):
-    rss_items = []
-    feed_images = images[:feed_size]
-    base_url = config["website"].get("base_url")
-    feed_url = f"{base_url}/feed.xml"
-
-    for img in feed_images:
-        description_text = escape(img['description'])
-
-        rss_items.append(f"""
-        <item>
-            <title>{description_text[:50]}</title>
-            <link>{base_url}/#img-{img['id']}</link>
-            <description>{description_text}</description>
-            <pubDate>{datetime.datetime.strptime(img['date'], '%Y-%m-%d').strftime('%a, %d %b %Y 00:00:00 GMT')}</pubDate>
-            <guid>{base_url}/#img-{img['id']}</guid>
-        </item>""")
-
-    rss_feed = f"""<?xml version="1.0" encoding="UTF-8" ?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
-  <channel>
-    <title>{escape(config["website"]["title"])}</title>
-    <link>{base_url}</link>
-    <atom:link href="{feed_url}" rel="self" type="application/rss+xml" />
-    <description>{escape(config["website"]["title"])} RSS feed</description>
-    {''.join(rss_items)}
-  </channel>
-</rss>"""
-
-    (output_dir / "feed.xml").write_text(rss_feed, encoding="utf-8")
-
-def sync_files(output_dir, hashes_file, cdn_config, config):
-    cdn = get_cdn(cdn_config["type"], config)
-    prev_hashes = load_hashes(hashes_file)
-    current_hashes = {}
-
-    files_to_upload = []
-    for file in output_dir.rglob("*"):
-        if file.is_file() and file.name != hashes_file.name:
-            file_hash = compute_hash(file)
-            relative = file.relative_to(output_dir).as_posix()
-            current_hashes[relative] = file_hash
-
-            if prev_hashes.get(relative) != file_hash:
-                files_to_upload.append(relative)
-
-    if files_to_upload:
-        cdn.upload_files(files_to_upload, output_dir)
-
-    save_hashes(current_hashes, hashes_file)
-
-if __name__ == "__main__":
+def main():
+    config_file = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "config.yaml"
     try:
-        config_file = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent / "config.yaml"
-
-        if not config_file.exists():
-            raise FileNotFoundError(f"Config file not found: {config_file}")
-
-        config = yaml.safe_load(config_file.read_text())
-        validate_config(config)
-
-        output_dir = Path(config["output"]["directory"])
-        hashes_file = output_dir / ".file_hashes.json"
-
+        config = load_config(config_file)
     except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
-        print(f"Config Error: {e}")
-        sys.exit(1)
+        sys.exit(f"Config Error: {e}")
 
-    jwt, _ = get_session(config["bluesky"]["handle"], config["bluesky"]["app_password"])
-    posts = fetch_all_posts(config["bluesky"]["handle"], jwt, max_posts=config["bluesky"]["max_posts"])
+    bsky = config["bluesky"]
+    output_dir = Path(config["output"]["directory"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    http = make_http_session()
+    try:
+        jwt = login(http, bsky["handle"], bsky["app_password"])
+    except requests.RequestException as e:
+        sys.exit(f"Bluesky login failed: {e}")
+
+    posts = fetch_posts(http, bsky["handle"], jwt, bsky["max_posts"])
     images = extract_images(
         posts,
-        config["bluesky"]["handle"],
+        bsky["handle"],
         output_dir,
+        http,
         host_images=config["output"]["host_images"],
-        hashtag=config["bluesky"]["hashtag"],
-        show_nsfw=config["bluesky"]["show_nsfw"]
+        hashtag=bsky["hashtag"],
     )
-    save_images_json(images, output_dir)
-    render_template(output_dir, config)
-    copy_style_css(output_dir)
-    render_template(output_dir, config)
-    copy_style_css(output_dir)
-    copy_favicon(output_dir)  # Add this line
-    generate_rss_feed(images, output_dir, config)
-    generate_rss_feed(images, output_dir, config)  
-    sync_files(output_dir, hashes_file, config["cdn"], config)
+    print(f"Found {len(images)} images in {len(posts)} posts.")
+
+    write_images_json(images, output_dir)
+    render_index(output_dir, config)
+    copy_static_assets(output_dir)
+    write_rss_feed(images, output_dir, config)
+    publish_changes(output_dir, config)
+
+
+if __name__ == "__main__":
+    main()

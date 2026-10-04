@@ -3,7 +3,6 @@ bluesky:
   app_password: "an app specific password, not your password"
   max_posts: 1000
   hashtag: "#photography"
-  show_nsfw: false
 
 output:
   directory: "output_site"

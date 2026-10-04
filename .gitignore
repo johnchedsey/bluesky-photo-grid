@@ -1,6 +1,28 @@
+# Secrets / local config (config.yaml holds your Bluesky app password)
 *.yaml
-index_template.html.old
-.gitgnore
+.env
+
+# Build output (docs/ is intentionally committed; these are not)
 /output_site
 /public
-.env
+*.part
+
+# Python
+__pycache__/
+*.pyc
+.venv*/
+venv/
+
+# Node / test tools (Playwright suite is kept local only)
+/playwright.config.js
+/tests/
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+cypress/screenshots/
+cypress/videos/
+
+# Misc
+index_template.html.old

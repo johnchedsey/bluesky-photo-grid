@@ -6,6 +6,14 @@ body {
   text-align: center;
 }
 h1 { padding: 1rem; }
+
+.subtitle a, .subtitle a:visited,
+.footer a, .footer a:visited {
+  color: white;
+  text-decoration: none;
+}
+
+/* Masonry grid */
 .grid {
   column-count: 4;
   column-gap: 10px;
@@ -22,38 +30,14 @@ h1 { padding: 1rem; }
   border-radius: 4px;
   display: block;
 }
-@media (max-width: 1024px) {
-  .grid {
-    column-count: 2;
-  }
-}
-@media (max-width: 375px) {
-  .grid {
-    column-count: 1;
-  }
-}
+
+/* Header / footer */
 .subtitle {
   width: 30%;
   margin: 1rem auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-@media (max-width: 1024px) {
-  .subtitle {
-    width: 70%;
-  }
-}
-@media (max-width: 375px) {
-  .subtitle {
-    width: 90%;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-}
-.subtitle a, .subtitle a:visited {
-  color: white;
-  text-decoration: none;
 }
 .modern-hr {
   width: 40%;
@@ -63,18 +47,13 @@ h1 { padding: 1rem; }
   background-image: linear-gradient(to right, transparent, #555, transparent);
   border-radius: 1px;
 }
-.footer {
-  margin: 1rem auto;
-  align-items: center;
-}
-.footer a, .footer a:visited {
-  color: white;
-  text-decoration: none;
-}
+.footer { margin: 1rem auto; }
+
+/* Lightbox caption */
 .lg-sub-html {
   font-size: 18px;
   color: #fff;
-  text-align: center; /* restore center alignment */
+  text-align: center;
 }
 .lg-sub-html .description {
   display: block;
@@ -92,65 +71,126 @@ h1 { padding: 1rem; }
   text-decoration: underline;
   margin-left: 15px;
 }
-.pagination {
-margin: 30px auto;
-text-align: center;
-display: inline-flex;
-gap: 10px;
-align-items: center;
-justify-content: center;
-background: rgba(255, 255, 255, 0.05);
-border-radius: 8px;
-padding: 10px 20px;
-box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+
+/* Sort and pagination bars */
+.controls {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin: 20px auto;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
 }
-.pagination button {
-padding: 8px 16px;
-background: linear-gradient(to bottom, #444, #333);
-border: none;
-color: #fff;
-border-radius: 6px;
-cursor: pointer;
-transition: background 0.2s ease, transform 0.1s ease;
-box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-font-size: 16px;
+.controls.pagination { margin: 30px auto; }
+.controls label {
+  font-size: 16px;
+  color: #ddd;
+  user-select: none;
 }
-.pagination button:hover {
-background: linear-gradient(to bottom, #555, #444);
-transform: translateY(-1px);
+.controls button,
+.controls select {
+  padding: 8px 16px;
+  background: linear-gradient(to bottom, #444, #333);
+  border: none;
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.1s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  font-size: 16px;
 }
-.pagination button:disabled {
-opacity: 0.4;
-cursor: default;
-transform: none;
-box-shadow: none;
+.controls select {
+  padding: 8px 12px;
+  min-width: 150px;
 }
-.pagination #page-indicator {
-font-size: 16px;
-color: #ddd;
-user-select: none;
+.controls button:hover:not(:disabled),
+.controls select:hover {
+  background: linear-gradient(to bottom, #555, #444);
+  transform: translateY(-1px);
 }
-.pagination select {
-padding: 8px 12px;
-background: linear-gradient(to bottom, #444, #333);
-border: none;
-color: #fff;
-border-radius: 6px;
-cursor: pointer;
-transition: background 0.2s ease, transform 0.1s ease;
-box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-font-size: 16px;
-min-width: 150px;
+.controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
 }
-.pagination select:hover {
-background: linear-gradient(to bottom, #555, #444);
-transform: translateY(-1px);
+.controls select:focus {
+  outline: 2px solid #666;
+  outline-offset: 2px;
 }
-.pagination select:focus {
-outline: 2px solid #666;
-outline-offset: 2px;
+.controls select option {
+  background: #333;
+  color: #fff;
 }
-.pagination select option {
-background: #333;
-color: #fff;
+
+/* NSFW toggle */
+.nsfw-toggle-wrapper {
+  display: flex;
+  justify-content: center;
+  margin: 0.75rem 0 0.25rem;
+}
+.nsfw-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.nsfw-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.nsfw-toggle-track {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: linear-gradient(to bottom, #333, #222);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+.nsfw-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: linear-gradient(to bottom, #bbb, #999);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.nsfw-toggle input:checked + .nsfw-toggle-track {
+  background: linear-gradient(to bottom, #a33, #822);
+}
+.nsfw-toggle input:checked + .nsfw-toggle-track .nsfw-toggle-thumb {
+  transform: translateX(20px);
+  background: linear-gradient(to bottom, #eee, #ccc);
+}
+.nsfw-toggle:focus-within .nsfw-toggle-track {
+  outline: 2px solid #666;
+  outline-offset: 2px;
+}
+.nsfw-toggle-label {
+  font-size: 14px;
+  color: #aaa;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 1024px) {
+  .grid { column-count: 2; }
+  .subtitle { width: 70%; }
+}
+@media (max-width: 375px) {
+  .grid { column-count: 1; }
+  .subtitle {
+    width: 90%;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
 }
