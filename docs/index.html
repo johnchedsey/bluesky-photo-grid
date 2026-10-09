@@ -9,19 +9,37 @@
   <link rel="alternate" type="application/rss+xml" title="Robot Impurity On Bluesky RSS" href="feed.xml">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@2.7.2/css/lightgallery.min.css">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Set the theme before the page paints so it doesn't flash the wrong colors: the visitor's
+    // saved choice if they made one, otherwise whatever their device is set to.
+    (() => {
+      let saved = null;
+      try { saved = localStorage.getItem('gallery-theme'); } catch (e) { /* storage unavailable */ }
+      const deviceLight = matchMedia('(prefers-color-scheme: light)').matches;
+      document.documentElement.dataset.theme =
+        saved === 'light' || saved === 'dark' ? saved : (deviceLight ? 'light' : 'dark');
+    })();
+  </script>
 </head>
 <body>
   <h1 data-cy="website-title">Robot Impurity On Bluesky</h1>
   <h3 class="subtitle" data-cy="website-subtitle"><a href="https://www.robotimpurity.com">Robot Impurity Photography</a>
 <a href="mailto:john@robotimpurity.com">Email Me!</a>
 </h3>
-  <div class="nsfw-toggle-wrapper">
-    <label class="nsfw-toggle" for="nsfw-toggle" title="Show or hide NSFW images">
+  <div class="toggle-row">
+    <label class="toggle toggle-nsfw" for="nsfw-toggle" title="Show or hide NSFW images">
       <input type="checkbox" id="nsfw-toggle" data-cy="nsfw-toggle" aria-label="Show NSFW images">
-      <span class="nsfw-toggle-track">
-        <span class="nsfw-toggle-thumb"></span>
+      <span class="toggle-track">
+        <span class="toggle-thumb"></span>
       </span>
-      <span class="nsfw-toggle-label">Show NSFW</span>
+      <span class="toggle-label">Show NSFW</span>
+    </label>
+    <label class="toggle" for="theme-toggle" title="Switch between light and dark mode">
+      <input type="checkbox" id="theme-toggle" data-cy="theme-toggle" aria-label="Light mode">
+      <span class="toggle-track">
+        <span class="toggle-thumb"></span>
+      </span>
+      <span class="toggle-label">Light mode</span>
     </label>
   </div>
   <hr class="modern-hr">
@@ -35,6 +53,12 @@
       <option value="likes-asc">Least Likes</option>
       <option value="reposts-desc">Most Reposts</option>
       <option value="replies-desc">Most Replies</option>
+    </select>
+    <label for="layout-select">Layout:</label>
+    <select id="layout-select" aria-label="Gallery layout" data-cy="layout-select">
+      <option value="justified">Justified Rows</option>
+      <option value="masonry">Masonry (Rows)</option>
+      <option value="columns">Masonry (Columns)</option>
     </select>
   </div>
 
@@ -59,13 +83,19 @@
       'replies-desc': (a, b) => b.replies - a.replies,
     };
     const DEFAULT_SORT = 'date-desc';
+    const LAYOUTS = ['justified', 'masonry', 'columns'];
+    const CONFIG_LAYOUT = "justified";
+    const LAYOUT_KEY = 'gallery-layout';
 
     const gallery = document.getElementById('lightgallery');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const pageSelect = document.getElementById('page-select');
     const sortSelect = document.getElementById('sort-select');
+    const layoutSelect = document.getElementById('layout-select');
     const nsfwToggle = document.getElementById('nsfw-toggle');
+    const themeToggle = document.getElementById('theme-toggle');
+    const THEME_KEY = 'gallery-theme';
 
     let lg = null;
     let allImages = [];
@@ -79,20 +109,38 @@
       ));
     }
 
+    // The visitor's last chosen layout, falling back to the site default.
+    function defaultLayout() {
+      let saved = null;
+      try { saved = localStorage.getItem(LAYOUT_KEY); } catch (e) { /* storage unavailable */ }
+      if (LAYOUTS.includes(saved)) return saved;
+      return LAYOUTS.includes(CONFIG_LAYOUT) ? CONFIG_LAYOUT : LAYOUTS[0];
+    }
+
     function readURL() {
       const params = new URLSearchParams(location.search);
       const page = parseInt(params.get('page'), 10);
       const sort = params.get('sort');
+      const layout = params.get('layout');
       return {
         page: page > 0 ? page : 1,
         sort: sort in SORTS ? sort : DEFAULT_SORT,
+        layout: LAYOUTS.includes(layout) ? layout : defaultLayout(),
       };
+    }
+
+    function applyURLState() {
+      const { page, sort, layout } = readURL();
+      sortSelect.value = sort;
+      layoutSelect.value = layout;
+      return page;
     }
 
     function writeURL(push) {
       const params = new URLSearchParams(location.search);
       params.set('page', currentPage);
       params.set('sort', sortSelect.value);
+      params.set('layout', layoutSelect.value);
       const url = `${location.pathname}?${params}${location.hash}`;
       if (push) history.pushState(null, '', url);
       else history.replaceState(null, '', url);
@@ -113,6 +161,48 @@
       return Math.max(1, Math.ceil(images.length / PAGE_SIZE));
     }
 
+    function setRatio(anchor, ratio) {
+      anchor.style.setProperty('--ar', ratio);
+      anchor.style.flexGrow = ratio;  // justified layout: rows stretch in proportion to width
+    }
+
+    function tileRatio(anchor) {
+      return parseFloat(anchor.style.getPropertyValue('--ar')) || 1;
+    }
+
+    // Place tiles left to right, each into the currently shortest column, keeping DOM
+    // order (which lightGallery uses for its slide order) the same as the visual order.
+    function layoutMasonry() {
+      if (layoutSelect.value !== 'masonry') return;
+      const style = getComputedStyle(gallery);
+      const cols = parseInt(style.getPropertyValue('--cols'), 10) || 1;
+      const gap = parseFloat(style.getPropertyValue('--gap')) || 0;
+      const colWidth = (gallery.clientWidth - gap * (cols - 1)) / cols;
+      const heights = new Array(cols).fill(0);
+
+      for (const anchor of gallery.children) {
+        const col = heights.indexOf(Math.min(...heights));
+        const height = colWidth / tileRatio(anchor);
+        Object.assign(anchor.style, {
+          left: `${col * (colWidth + gap)}px`,
+          top: `${heights[col]}px`,
+          width: `${colWidth}px`,
+          height: `${height}px`,
+        });
+        heights[col] += height + gap;
+      }
+      gallery.style.height = `${Math.max(0, Math.max(...heights) - gap)}px`;
+    }
+
+    let layoutFrame = 0;
+    function scheduleLayout() {
+      if (layoutFrame) return;
+      layoutFrame = requestAnimationFrame(() => {
+        layoutFrame = 0;
+        layoutMasonry();
+      });
+    }
+
     function createTile(img, idx) {
       const anchor = document.createElement('a');
       anchor.href = img.src;
@@ -128,6 +218,16 @@
       tile.src = USE_HIGHRES_TILE ? img.src : img.thumb;
       tile.alt = img.alt || '';
       tile.loading = 'lazy';
+      if (img.aspect_ratio) {
+        setRatio(anchor, img.aspect_ratio);
+      } else {
+        // Older images.json files have no aspect_ratio; learn it once the image loads.
+        tile.addEventListener('load', () => {
+          img.aspect_ratio = tile.naturalWidth / tile.naturalHeight;
+          setRatio(anchor, img.aspect_ratio);
+          scheduleLayout();
+        }, { once: true });
+      }
       anchor.appendChild(tile);
       return anchor;
     }
@@ -138,7 +238,10 @@
       const start = (currentPage - 1) * PAGE_SIZE;
       pageImages = images.slice(start, start + PAGE_SIZE);
 
+      gallery.className = `grid layout-${layoutSelect.value}`;
+      gallery.style.height = '';
       gallery.replaceChildren(...pageImages.map(createTile));
+      layoutMasonry();
       if (lg) lg.destroy();
       lg = lightGallery(gallery, { selector: 'a', download: false, counter: false });
 
@@ -170,8 +273,7 @@
       }
       allImages = await response.json();
 
-      const { page, sort } = readURL();
-      sortSelect.value = sort;
+      const page = applyURLState();
       applyFilterAndSort();
       renderPage(page, 'replace');
       openImageFromHash();
@@ -189,10 +291,42 @@
       applyFilterAndSort();
       renderPage(1);
     };
+    layoutSelect.onchange = () => {
+      try { localStorage.setItem(LAYOUT_KEY, layoutSelect.value); } catch (e) { /* storage unavailable */ }
+      renderPage(currentPage, 'replace');
+    };
+
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      themeToggle.checked = theme === 'light';
+    }
+
+    function hasSavedTheme() {
+      try { return ['light', 'dark'].includes(localStorage.getItem(THEME_KEY)); } catch (e) { return false; }
+    }
+
+    themeToggle.checked = document.documentElement.dataset.theme === 'light';
+    themeToggle.onchange = () => {
+      const theme = themeToggle.checked ? 'light' : 'dark';
+      applyTheme(theme);
+      try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* storage unavailable */ }
+    };
+
+    // Until the visitor picks a theme, follow their device when its setting changes.
+    matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+      if (!hasSavedTheme()) applyTheme(e.matches ? 'light' : 'dark');
+    });
+
+    // Re-place masonry tiles when the gallery width changes (window resize, scrollbar).
+    let lastWidth = 0;
+    new ResizeObserver(() => {
+      if (gallery.clientWidth === lastWidth) return;
+      lastWidth = gallery.clientWidth;
+      scheduleLayout();
+    }).observe(gallery);
 
     window.onpopstate = () => {
-      const { page, sort } = readURL();
-      sortSelect.value = sort;
+      const page = applyURLState();
       applyFilterAndSort();
       renderPage(page, 'none');
     };
