@@ -32,6 +32,7 @@ output:
   posts_per_page: <posts per page, consider performance / load time>
   host_images: <do you want to store the images in your cdn or refer to bluesky: true/false>
   highres_tile: <do you want to use the full res images in the tile grid, consider performance: true/false>
+  layout: <default gallery layout, visitors can switch it: justified (rows of equal height, the default), masonry (row order), columns (column order)>
 
 cdn:
   type: <see docs>

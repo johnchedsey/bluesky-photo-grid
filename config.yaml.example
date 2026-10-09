@@ -9,6 +9,7 @@ output:
   posts_per_page: 25
   highres_tile: false
   host_images: false 
+  layout: justified  # default gallery layout: justified, masonry, columns
 
 cdn:
   type: local  # options: local, s3, s3_cloudfront, github_pages

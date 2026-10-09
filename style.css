@@ -1,34 +1,127 @@
+/* Theme colors. The page sets data-theme on <html> from the visitor's choice or their
+   device setting; dark is the fallback when that script can't run. */
+:root {
+  color-scheme: dark;
+  --bg: #111;
+  --text: #eee;
+  --link: #fff;
+  --muted: #aaa;
+  --label: #ddd;
+  --rule: #555;
+  --panel: rgba(255, 255, 255, 0.05);
+  --panel-shadow: rgba(0, 0, 0, 0.3);
+  --btn-top: #444;
+  --btn-bottom: #333;
+  --btn-hover-top: #555;
+  --btn-hover-bottom: #444;
+  --btn-text: #fff;
+  --btn-shadow: rgba(0, 0, 0, 0.4);
+  --option-bg: #333;
+  --focus: #666;
+  --track-top: #333;
+  --track-bottom: #222;
+  --track-shadow: rgba(0, 0, 0, 0.5);
+  --thumb-top: #bbb;
+  --thumb-bottom: #999;
+  --toggle-on-top: #4a6a8a;
+  --toggle-on-bottom: #3a5570;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f4f2;
+  --text: #222;
+  --link: #111;
+  --muted: #666;
+  --label: #333;
+  --rule: #bbb;
+  --panel: rgba(0, 0, 0, 0.04);
+  --panel-shadow: rgba(0, 0, 0, 0.12);
+  --btn-top: #fff;
+  --btn-bottom: #e8e8e8;
+  --btn-hover-top: #f6f6f6;
+  --btn-hover-bottom: #dcdcdc;
+  --btn-text: #222;
+  --btn-shadow: rgba(0, 0, 0, 0.18);
+  --option-bg: #fff;
+  --focus: #999;
+  --track-top: #ccc;
+  --track-bottom: #ddd;
+  --track-shadow: rgba(0, 0, 0, 0.2);
+  --thumb-top: #fff;
+  --thumb-bottom: #eee;
+  --toggle-on-top: #6b8fb3;
+  --toggle-on-bottom: #557a9e;
+}
+
 body {
   font-family: sans-serif;
   margin: 0;
-  background: #111;
-  color: #eee;
+  background: var(--bg);
+  color: var(--text);
   text-align: center;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 h1 { padding: 1rem; }
 
 .subtitle a, .subtitle a:visited,
 .footer a, .footer a:visited {
-  color: white;
+  color: var(--link);
   text-decoration: none;
 }
 
-/* Masonry grid */
+/* Gallery grid. --ar (width / height) is set per tile from the image data. */
 .grid {
-  column-count: 4;
-  column-gap: 10px;
+  --cols: 4;        /* masonry and columns layouts */
+  --row-h: 280px;   /* target row height for the justified layout */
+  --gap: 10px;
 }
 .grid a {
-  display: inline-block;
-  width: 100%;
-  margin-bottom: 10px;
-  break-inside: avoid;
+  display: block;
+  overflow: hidden;
+  border-radius: 4px;
 }
 .grid img {
-  width: 100%;
-  height: auto;
-  border-radius: 4px;
   display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Justified: left-to-right rows of equal height, each row filling the width.
+   Width and flex-grow are both proportional to --ar, so every tile in a row
+   stretches by the same factor and keeps its shape. */
+.layout-justified {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+}
+.layout-justified a {
+  width: calc(var(--ar, 1) * var(--row-h));
+  min-width: 0;
+  aspect-ratio: var(--ar, 1);
+}
+.layout-justified::after {
+  content: '';
+  flex-grow: 1000000;  /* soak up the last row's spare space instead of stretching it */
+}
+
+/* Masonry: tiles keep their shape and are placed left to right into the
+   shortest column. Positions are computed in JS (layoutMasonry). */
+.layout-masonry { position: relative; }
+.layout-masonry a { position: absolute; }
+
+/* Columns: the original masonry, filled top to bottom one column at a time. */
+.layout-columns {
+  column-count: var(--cols);
+  column-gap: var(--gap);
+}
+.layout-columns a {
+  margin-bottom: var(--gap);
+  break-inside: avoid;
+}
+.layout-columns img {
+  height: auto;
+  aspect-ratio: var(--ar, auto);
 }
 
 /* Header / footer */
@@ -44,7 +137,7 @@ h1 { padding: 1rem; }
   margin: 2rem auto;
   border: none;
   height: 2px;
-  background-image: linear-gradient(to right, transparent, #555, transparent);
+  background-image: linear-gradient(to right, transparent, var(--rule), transparent);
   border-radius: 1px;
 }
 .footer { margin: 1rem auto; }
@@ -75,31 +168,34 @@ h1 { padding: 1rem; }
 /* Sort and pagination bars */
 .controls {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
   gap: 10px;
   align-items: center;
   justify-content: center;
   margin: 20px auto;
   padding: 10px 20px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--panel);
   border-radius: 8px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 5px var(--panel-shadow);
 }
 .controls.pagination { margin: 30px auto; }
 .controls label {
   font-size: 16px;
-  color: #ddd;
+  color: var(--label);
   user-select: none;
 }
 .controls button,
 .controls select {
   padding: 8px 16px;
-  background: linear-gradient(to bottom, #444, #333);
+  background: linear-gradient(to bottom, var(--btn-top), var(--btn-bottom));
   border: none;
-  color: #fff;
+  color: var(--btn-text);
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s ease, transform 0.1s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 4px var(--btn-shadow);
   font-size: 16px;
 }
 .controls select {
@@ -108,7 +204,7 @@ h1 { padding: 1rem; }
 }
 .controls button:hover:not(:disabled),
 .controls select:hover {
-  background: linear-gradient(to bottom, #555, #444);
+  background: linear-gradient(to bottom, var(--btn-hover-top), var(--btn-hover-bottom));
   transform: translateY(-1px);
 }
 .controls button:disabled {
@@ -117,77 +213,82 @@ h1 { padding: 1rem; }
   box-shadow: none;
 }
 .controls select:focus {
-  outline: 2px solid #666;
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 .controls select option {
-  background: #333;
-  color: #fff;
+  background: var(--option-bg);
+  color: var(--btn-text);
 }
 
-/* NSFW toggle */
-.nsfw-toggle-wrapper {
+/* Switches (NSFW, light mode) */
+.toggle-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 1.5rem;
   margin: 0.75rem 0 0.25rem;
 }
-.nsfw-toggle {
+.toggle {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
   user-select: none;
 }
-.nsfw-toggle input[type="checkbox"] {
+.toggle input[type="checkbox"] {
   position: absolute;
   opacity: 0;
   width: 0;
   height: 0;
 }
-.nsfw-toggle-track {
+.toggle-track {
   position: relative;
   width: 44px;
   height: 24px;
-  background: linear-gradient(to bottom, #333, #222);
+  background: linear-gradient(to bottom, var(--track-top), var(--track-bottom));
   border-radius: 12px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 3px var(--track-shadow), 0 1px 0 rgba(255, 255, 255, 0.04);
   transition: background 0.2s ease;
   flex-shrink: 0;
 }
-.nsfw-toggle-thumb {
+.toggle-thumb {
   position: absolute;
   top: 3px;
   left: 3px;
   width: 18px;
   height: 18px;
-  background: linear-gradient(to bottom, #bbb, #999);
+  background: linear-gradient(to bottom, var(--thumb-top), var(--thumb-bottom));
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   transition: transform 0.2s ease, background 0.2s ease;
 }
-.nsfw-toggle input:checked + .nsfw-toggle-track {
+.toggle input:checked + .toggle-track {
+  background: linear-gradient(to bottom, var(--toggle-on-top), var(--toggle-on-bottom));
+}
+.toggle-nsfw input:checked + .toggle-track {
   background: linear-gradient(to bottom, #a33, #822);
 }
-.nsfw-toggle input:checked + .nsfw-toggle-track .nsfw-toggle-thumb {
+.toggle input:checked + .toggle-track .toggle-thumb {
   transform: translateX(20px);
   background: linear-gradient(to bottom, #eee, #ccc);
 }
-.nsfw-toggle:focus-within .nsfw-toggle-track {
-  outline: 2px solid #666;
+.toggle:focus-within .toggle-track {
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-.nsfw-toggle-label {
+.toggle-label {
   font-size: 14px;
-  color: #aaa;
+  color: var(--muted);
   letter-spacing: 0.02em;
 }
 
 @media (max-width: 1024px) {
-  .grid { column-count: 2; }
+  .grid { --cols: 2; --row-h: 200px; }
   .subtitle { width: 70%; }
 }
 @media (max-width: 375px) {
-  .grid { column-count: 1; }
+  .grid { --cols: 1; --row-h: 140px; }
   .subtitle {
     width: 90%;
     flex-direction: column;

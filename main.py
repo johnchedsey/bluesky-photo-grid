@@ -22,6 +22,7 @@ API_BASE = "https://bsky.social/xrpc"
 REQUEST_TIMEOUT = 20
 FAVICONS = ("favicon.png", "favicon.svg", "favicon.ico")
 NSFW_LABELS = {"porn", "sexual", "nudity", "graphic-media", "spam", "!hide", "!warn"}
+LAYOUTS = {"justified", "masonry", "columns"}
 
 REQUIRED_KEYS = {
     "bluesky": ["handle", "app_password"],
@@ -31,7 +32,7 @@ REQUIRED_KEYS = {
 }
 DEFAULTS = {
     "bluesky": {"max_posts": 1000, "hashtag": "#photography"},
-    "output": {"highres_tile": False, "host_images": False},
+    "output": {"highres_tile": False, "host_images": False, "layout": "justified"},
 }
 
 
@@ -54,6 +55,9 @@ def load_config(path):
     for section, defaults in DEFAULTS.items():
         for key, value in defaults.items():
             config[section].setdefault(key, value)
+
+    if config["output"]["layout"] not in LAYOUTS:
+        raise ValueError(f"output.layout must be one of: {', '.join(sorted(LAYOUTS))}")
     return config
 
 
@@ -151,6 +155,13 @@ def host_image(http, url, output_dir, filename):
     return dest.relative_to(output_dir).as_posix() if download(http, url, dest) else url
 
 
+def aspect_ratio(img):
+    """Width / height from the embed's aspectRatio, or None when Bluesky doesn't report it."""
+    ratio = img.get("aspectRatio") or {}
+    width, height = ratio.get("width"), ratio.get("height")
+    return round(width / height, 4) if width and height else None
+
+
 def extract_images(posts, handle, output_dir, http, host_images=False, hashtag="#photography"):
     images = []
     for item in posts:
@@ -188,6 +199,7 @@ def extract_images(posts, handle, output_dir, http, host_images=False, hashtag="
                 "src": src,
                 "thumb": thumb or src,
                 "alt": img.get("alt", ""),
+                "aspect_ratio": aspect_ratio(img),
                 **post_info,
             })
     return images
@@ -286,7 +298,7 @@ def main():
     config_file = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "config.yaml"
     try:
         config = load_config(config_file)
-    except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
+    except (FileNotFoundError, yaml.YAMLError, KeyError, ValueError) as e:
         sys.exit(f"Config Error: {e}")
 
     bsky = config["bluesky"]
